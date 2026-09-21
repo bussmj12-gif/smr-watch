@@ -1,75 +1,524 @@
-// pages/api/smr/save.js
-// 선택된 기사들을 카드로 다듬어 저장합니다.
-// 저장할 때마다 기존 카드는 "보관"(is_current=false) 처리하고, 새로 선택한 것만 "현재 브리핑"(is_current=true)이 됩니다.
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SMR WATCH — 소형모듈원자로 브리핑</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=IBM+Plex+Sans+KR:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
 
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
-
-export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', 'https://bussmj12-gif.github.io');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'POST만 허용됩니다' });
-
-  const { selected } = req.body || {};
-  if (!Array.isArray(selected) || selected.length === 0) {
-    return res.status(400).json({ error: '선택된 항목(selected)이 필요합니다' });
+  :root{
+    --navy-deep:#0F1B2B;
+    --navy-line:#2C4A63;
+    --navy-line-soft:#1D3348;
+    --paper:#F6F3E9;
+    --paper-dim:#E9E4D4;
+    --ink:#1A1F26;
+    --amber:#E0982F;
+    --amber-soft:#B97A22;
+    --text-light:#DCE3E9;
+    --text-faint:#8FA3B5;
   }
 
-  try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-5',
-        max_tokens: 8192,
-        system:
-          '아래 기사 정보를 뉴스 카드 형식으로 다듬어라. 출력은 JSON 배열만, 다른 텍스트 없이.\n' +
-          '[{"tag":"국내|해외|인증|투자|기술 중 하나","title":"간결하고 임팩트 있는 제목(한글)",' +
-          '"summary":"카드에 보일 1~2문장 핵심 요약(한글)",' +
-          '"detail":"신문 기사처럼 배경, 맥락, 의미, 향후 전망까지 포함한 5~8문장 상세 설명(한글). 단순 요약이 아니라 왜 중요한지, 관련 업계에 어떤 영향이 있는지까지 풀어서 서술한다.",' +
-          '"source":"출처명","date":"YYYY-MM-DD","url":"원문 링크"}]',
-        messages: [
-          { role: 'user', content: `다음 기사들을 카드로 다듬어줘:\n${JSON.stringify(selected)}` },
-        ],
-      }),
+  *{box-sizing:border-box; margin:0; padding:0;}
+
+  body{
+    background:var(--navy-deep);
+    color:var(--text-light);
+    font-family:'IBM Plex Sans KR', sans-serif;
+    line-height:1.6;
+  }
+
+  /* faint blueprint grid backdrop */
+  body{
+    background-image:
+      linear-gradient(var(--navy-line-soft) 1px, transparent 1px),
+      linear-gradient(90deg, var(--navy-line-soft) 1px, transparent 1px);
+    background-size: 48px 48px;
+    background-position: -1px -1px;
+  }
+
+  .wrap{max-width:920px; margin:0 auto; padding:0 24px;}
+
+  /* ---- NAV ---- */
+  nav{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:22px 0; border-bottom:1px solid var(--navy-line);
+  }
+  .brand{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:14px; letter-spacing:0.04em; color:var(--text-light);
+    display:flex; align-items:center; gap:10px;
+  }
+  .brand-mark{
+    width:9px; height:9px; background:var(--amber); border-radius:50%;
+    box-shadow:0 0 8px var(--amber);
+  }
+  .navlinks{display:flex; gap:28px; font-size:13.5px; font-family:'IBM Plex Mono', monospace; color:var(--text-faint);}
+  .navlinks span{cursor:default;}
+
+  /* ---- HERO ---- */
+  .hero{padding:56px 0 40px; border-bottom:1px solid var(--navy-line);}
+  .hero-eyebrow{
+    font-family:'IBM Plex Mono', monospace; font-size:12.5px; color:var(--amber);
+    margin-bottom:14px;
+  }
+  .hero h1{
+    font-family:'Fraunces', serif; font-weight:500; font-size:44px;
+    line-height:1.18; color:#F4F1E6; max-width:680px; letter-spacing:-0.01em;
+  }
+  .hero p.lead{
+    margin-top:18px; max-width:560px; color:var(--text-faint); font-size:15.5px;
+  }
+
+  .gauges{
+    display:grid; grid-template-columns:repeat(4,1fr); gap:0;
+    margin-top:40px; border:1px solid var(--navy-line);
+  }
+  .gauge{
+    padding:16px 18px; border-right:1px solid var(--navy-line);
+  }
+  .gauge:last-child{border-right:none;}
+  .gauge-label{
+    font-family:'IBM Plex Mono', monospace; font-size:11px; color:var(--text-faint);
+  }
+  .gauge-value{
+    font-family:'Fraunces', serif; font-size:26px; color:var(--paper); margin-top:6px;
+  }
+
+  /* ---- SECTION HEADER ---- */
+  .section-head{
+    display:flex; justify-content:space-between; align-items:baseline;
+    margin:48px 0 18px;
+  }
+  .section-head h2{
+    font-family:'Fraunces', serif; font-weight:500; font-size:22px; color:#F4F1E6;
+  }
+  .section-head .count{
+    font-family:'IBM Plex Mono', monospace; font-size:12px; color:var(--text-faint);
+  }
+
+  /* ---- ARTICLE CARD (blueprint plate) ---- */
+  .articles{display:flex; flex-direction:column; gap:14px; margin-bottom:56px;}
+  .card{
+    position:relative;
+    background:var(--paper);
+    color:var(--ink);
+    border:1px solid var(--navy-line);
+    padding:22px 24px;
+    display:grid;
+    grid-template-columns:120px 1fr;
+    gap:20px;
+  }
+  /* corner registration ticks, drafting-table feel */
+  .card::before, .card::after{
+    content:""; position:absolute; width:9px; height:9px;
+    border-top:1.5px solid var(--amber); border-left:1.5px solid var(--amber);
+    top:-1px; left:-1px;
+  }
+  .card::after{
+    border-top:none; border-left:none;
+    border-bottom:1.5px solid var(--amber); border-right:1.5px solid var(--amber);
+    top:auto; left:auto; bottom:-1px; right:-1px;
+  }
+  .card-meta{
+    font-family:'IBM Plex Mono', monospace; font-size:11.5px; color:#5C6A76;
+  }
+  .card-meta .tag{
+    display:inline-block; margin-top:8px; padding:2px 7px;
+    background:var(--navy-deep); color:var(--amber);
+    font-size:10.5px;
+  }
+  .card h3{
+    font-family:'Fraunces', serif; font-weight:500; font-size:19px; line-height:1.3;
+    margin-bottom:8px;
+  }
+  .card p{font-size:14px; color:#3A4249;}
+  .card .src{
+    margin-top:10px; font-family:'IBM Plex Mono', monospace; font-size:11px; color:#7A8792;
+  }
+
+  /* ---- NEWSLETTER PANEL ---- */
+  /* ---- SEARCH PANEL ---- */
+  .search-panel{
+    border:1px solid var(--navy-line);
+    padding:24px;
+    margin-bottom:40px;
+  }
+  .search-row{display:flex; gap:10px;}
+  .search-row input{
+    flex:1; background:var(--navy-deep); border:1px solid var(--navy-line);
+    color:var(--text-light); padding:12px 14px; font-family:'IBM Plex Sans KR', sans-serif;
+    font-size:14px;
+  }
+  .search-row input:focus{outline:1px solid var(--amber);}
+  .search-status{font-family:'IBM Plex Mono', monospace; font-size:12px; color:var(--text-faint); margin-top:10px;}
+  .results{margin-top:16px; display:flex; flex-direction:column; gap:10px;}
+  .result-item{
+    display:flex; gap:12px; align-items:flex-start;
+    padding:12px 14px; border:1px solid var(--navy-line); background:#122132;
+  }
+  .result-item input[type=checkbox]{margin-top:4px; accent-color:var(--amber);}
+  .result-text .rt{font-family:'Fraunces',serif; font-size:15px; color:#F4F1E6;}
+  .result-text .rs{font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--text-faint); margin-top:4px;}
+  .result-text .rd{font-size:13px; color:var(--text-faint); margin-top:6px;}
+  .save-row{margin-top:14px; display:flex; justify-content:flex-end;}
+
+  /* ---- MODAL ---- */
+  .modal-backdrop{
+    display:none; position:fixed; inset:0; background:rgba(6,11,18,0.75);
+    z-index:50; align-items:center; justify-content:center; padding:24px;
+  }
+  .modal-backdrop.open{display:flex;}
+  .modal{
+    background:var(--paper); color:var(--ink); max-width:560px; width:100%;
+    padding:32px; position:relative; max-height:80vh; overflow-y:auto;
+  }
+  .modal-close{position:absolute; top:14px; right:16px; cursor:pointer; font-family:'IBM Plex Mono',monospace; color:#5C6A76; background:none; border:none; font-size:16px;}
+  .modal h3{font-family:'Fraunces',serif; font-size:22px; margin-bottom:10px;}
+  .modal .meta{font-family:'IBM Plex Mono',monospace; font-size:11.5px; color:#5C6A76; margin-bottom:14px;}
+  .modal p{font-size:14.5px; margin-bottom:14px;}
+  .modal a{color:var(--amber-soft); font-family:'IBM Plex Mono',monospace; font-size:12px;}
+
+  .newsletter{
+    border:1px solid var(--amber-soft);
+    padding:32px;
+    margin-bottom:64px;
+    display:grid; grid-template-columns:1fr auto; gap:24px; align-items:center;
+  }
+  .newsletter h3{
+    font-family:'Fraunces', serif; font-size:20px; color:#F4F1E6; margin-bottom:8px;
+  }
+  .newsletter p{color:var(--text-faint); font-size:13.5px; max-width:440px;}
+  .btn{
+    font-family:'IBM Plex Mono', monospace; font-size:13px;
+    background:var(--amber); color:var(--navy-deep);
+    border:none; padding:14px 22px; cursor:pointer;
+    transition:background 0.15s ease;
+    white-space:nowrap;
+  }
+  .btn:hover{background:#F0AB4A;}
+  .btn:disabled{background:#6B5A3A; color:#3A3F45; cursor:progress;}
+
+  footer{
+    border-top:1px solid var(--navy-line); padding:24px 0 40px;
+    font-family:'IBM Plex Mono', monospace; font-size:11.5px; color:var(--text-faint);
+    display:flex; justify-content:space-between;
+  }
+
+  @media (max-width:640px){
+    .hero h1{font-size:32px;}
+    .gauges{grid-template-columns:repeat(2,1fr);}
+    .gauge:nth-child(2){border-right:none;}
+    .card{grid-template-columns:1fr;}
+    .newsletter{grid-template-columns:1fr;}
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <nav>
+    <div class="brand"><span class="brand-mark"></span>SMR WATCH</div>
+    <div class="navlinks"><span>브리핑</span><span>기술 동향</span><span>규제·인증</span></div>
+  </nav>
+
+  <section class="hero">
+    <div class="hero-eyebrow">2026.09.04 업데이트</div>
+    <h1>소형모듈원자로,<br>흩어진 뉴스를 하나의 궤도로.</h1>
+    <p class="lead">전 세계 SMR 프로젝트와 인증 동향을 모아 요약합니다. 업데이트될 때마다 이 페이지가 갱신되고, 원하는 기간을 골라 신문 형식 PDF로 내려받을 수 있습니다.</p>
+
+    <div class="gauges">
+      <div class="gauge"><div class="gauge-label">추적 프로젝트</div><div class="gauge-value">31</div></div>
+      <div class="gauge"><div class="gauge-label">이번 주 신규</div><div class="gauge-value">4</div></div>
+      <div class="gauge"><div class="gauge-label">인증 진행중</div><div class="gauge-value">9</div></div>
+      <div class="gauge"><div class="gauge-label">국내 연계</div><div class="gauge-value">i-SMR</div></div>
+    </div>
+  </section>
+
+  <div class="search-panel">
+    <div class="section-head" style="margin:0 0 14px;">
+      <h2 style="font-size:18px;">새 소식 검색 &amp; 카드 추가</h2>
+    </div>
+    <div class="search-row">
+      <input type="text" id="searchInput" placeholder="예: i-SMR, SMART, BWRX-300 ...">
+      <button class="btn" id="searchBtn" onclick="runSearch()">검색</button>
+    </div>
+    <div class="search-status" id="searchStatus"></div>
+    <div class="results" id="resultsBox"></div>
+    <div class="save-row" id="saveRow" style="display:none;">
+      <button class="btn" id="saveBtn" onclick="saveSelected()">선택한 항목 카드로 저장</button>
+    </div>
+  </div>
+
+  <div class="section-head">
+    <h2>브리핑</h2>
+    <span class="count" id="articleCount">불러오는 중...</span>
+  </div>
+
+  <div class="articles" id="articleList"></div>
+
+  <div class="modal-backdrop" id="modalBackdrop" onclick="if(event.target===this) closeModal()">
+    <div class="modal">
+      <button class="modal-close" onclick="closeModal()">닫기 ✕</button>
+      <div class="meta" id="modalMeta"></div>
+      <h3 id="modalTitle"></h3>
+      <p id="modalDetail"></p>
+      <a id="modalLink" href="#" target="_blank" rel="noopener">원문 보기 →</a>
+    </div>
+  </div>
+
+  <div class="newsletter">
+    <div>
+      <h3>이번 주 브리핑을 신문 형식 PDF로</h3>
+      <p>위 기사 목록을 A4 신문 레이아웃으로 변환합니다. 다운로드 후 바로 공유할 수 있습니다.</p>
+    </div>
+    <button class="btn" id="pdfBtn" onclick="generatePDF()">PDF 뉴스레터 생성 ↓</button>
+  </div>
+
+  <footer>
+    <span>SMR WATCH · 개인 학습 프로젝트</span>
+    <span>SM Jeong</span>
+  </footer>
+
+</div>
+
+<script>
+<script>
+async function generatePDF(){
+  const btn = document.getElementById('pdfBtn');
+  btn.disabled = true;
+  btn.textContent = '생성 중...';
+
+  try{
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF('p','pt','a4');
+    const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
+    const margin = 46;
+    const contentW = pageW - margin*2;
+    let y = margin;
+
+    const amber = [176, 108, 32];
+    const ink = [26, 31, 38];
+    const gray = [110, 120, 130];
+    const ruleGray = [206, 199, 176];
+
+    function newPage(){
+      pdf.addPage();
+      y = margin;
+      drawFooter();
+    }
+    function ensureSpace(h){
+      if(y + h > pageH - 50){ newPage(); }
+    }
+    function drawFooter(){
+      const p = pdf.internal.getNumberOfPages();
+      pdf.setFont('helvetica','normal'); pdf.setFontSize(8.5); pdf.setTextColor(...gray);
+      pdf.text(`SMR WATCH · ${p}`, pageW/2, pageH-28, {align:'center'});
+    }
+    function fmtDate(d){
+      if(!d) return '';
+      const [Y,M,D] = d.split('-');
+      return `${Y}.${M}.${D}`;
+    }
+
+    // ===== Masthead =====
+    pdf.setFont('times','bold'); pdf.setFontSize(30); pdf.setTextColor(...ink);
+    pdf.text('SMR WATCH', margin, y+26);
+    pdf.setFont('helvetica','normal'); pdf.setFontSize(9.5); pdf.setTextColor(...gray);
+    const todayStr = new Date().toISOString().slice(0,10).replace(/-/g,'.');
+    pdf.text(`${todayStr} 발행 · 소형모듈원자로 브리핑`, pageW-margin, y+26, {align:'right'});
+    y += 38;
+    pdf.setDrawColor(...ink); pdf.setLineWidth(2);
+    pdf.line(margin, y, pageW-margin, y);
+    y += 3;
+    pdf.setDrawColor(...ink); pdf.setLineWidth(0.6);
+    pdf.line(margin, y, pageW-margin, y);
+    y += 26;
+    drawFooter();
+
+    // ===== Articles =====
+    currentCards.forEach((c, idx) => {
+      // measure heights first
+      pdf.setFont('helvetica','bold'); pdf.setFontSize(9);
+      const tagW = pdf.getTextWidth((c.tag||'기타')) + 14;
+
+      pdf.setFont('times','bold'); pdf.setFontSize(16.5);
+      const titleLines = pdf.splitTextToSize(c.title||'', contentW);
+
+      const bodyText = [c.summary, c.detail].filter(Boolean).join(' ');
+      pdf.setFont('helvetica','normal'); pdf.setFontSize(10.5);
+      const bodyLines = pdf.splitTextToSize(bodyText, contentW);
+
+      const blockH = 22 + titleLines.length*20 + bodyLines.length*14 + 26;
+      ensureSpace(blockH);
+
+      // tag chip + date
+      pdf.setFillColor(...amber);
+      pdf.rect(margin, y, tagW, 15, 'F');
+      pdf.setFont('helvetica','bold'); pdf.setFontSize(9); pdf.setTextColor(255,255,255);
+      pdf.text((c.tag||'기타'), margin+7, y+11);
+
+      pdf.setFont('helvetica','normal'); pdf.setFontSize(9.5); pdf.setTextColor(...gray);
+      pdf.text(fmtDate(c.date) + (c.source ? `  ·  ${c.source}` : ''), margin+tagW+10, y+11);
+      y += 24;
+
+      // headline
+      pdf.setFont('times','bold'); pdf.setFontSize(16.5); pdf.setTextColor(...ink);
+      titleLines.forEach(line => { pdf.text(line, margin, y+13); y += 20; });
+      y += 4;
+
+      // body
+      pdf.setFont('helvetica','normal'); pdf.setFontSize(10.5); pdf.setTextColor(50,56,62);
+      bodyLines.forEach(line => { pdf.text(line, margin, y); y += 14; });
+      y += 6;
+
+      // source link
+      if(c.url){
+        pdf.setFont('helvetica','normal'); pdf.setFontSize(9.5); pdf.setTextColor(...amber);
+        pdf.textWithLink('원문 기사 보기 →', margin, y, { url: c.url });
+        y += 14;
+      }
+
+      y += 8;
+      pdf.setDrawColor(...ruleGray); pdf.setLineWidth(0.5);
+      pdf.line(margin, y, pageW-margin, y);
+      y += 22;
     });
 
-    const data = await response.json();
-    const textBlock = (data.content || []).find((b) => b.type === 'text');
-    if (!textBlock) throw new Error('Claude 응답에 텍스트가 없습니다');
+    pdf.save(`SMR-WATCH_${new Date().toISOString().slice(0,10)}.pdf`);
+  }catch(e){
+    alert('PDF 생성 중 오류가 발생했습니다.');
+    console.error(e);
+  }
 
-    const cleaned = textBlock.text.replace(/```json|```/g, '').trim();
-    let cards;
-    try {
-      cards = JSON.parse(cleaned);
-    } catch (e) {
-      console.error('JSON 파싱 실패, 원문:', cleaned);
-      throw new Error('카드 형식 변환에 실패했습니다 (응답이 잘렸을 수 있음)');
-    }
-    cards = cards.map((c) => ({ ...c, is_current: true }));
+  btn.disabled = false;
+  btn.textContent = 'PDF 뉴스레터 생성 ↓';
+}
 
-    const { error: archiveError } = await supabase
-      .from('smr_articles')
-      .update({ is_current: false })
-      .eq('is_current', true);
-    if (archiveError) throw archiveError;
+// ===== 검색 / 선택 / 저장 / 표시 로직 =====
+// 필요시 이 주소만 본인의 Vercel 배포 주소로 바꾸면 됩니다.
+const API_BASE = 'https://lloyd-inquiry-system.vercel.app/api/smr';
 
-    const { error: insertError } = await supabase.from('smr_articles').insert(cards);
-    if (insertError) throw insertError;
+let currentResults = [];
+let currentCards = [];
 
-    return res.status(200).json({ saved: cards.length });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: err.message || '저장 중 오류가 발생했습니다' });
+async function loadCards(){
+  const countEl = document.getElementById('articleCount');
+  const listEl = document.getElementById('articleList');
+  try{
+    const res = await fetch(`${API_BASE}/list`);
+    const data = await res.json();
+    currentCards = data.items || [];
+    renderCards();
+    countEl.textContent = `총 ${currentCards.length}건`;
+  }catch(e){
+    countEl.textContent = '불러오기 실패 — 잠시 후 새로고침 해보세요';
+    listEl.innerHTML = '';
   }
 }
+
+function renderCards(){
+  const listEl = document.getElementById('articleList');
+  listEl.innerHTML = currentCards.map((c, i) => `
+    <article class="card" style="cursor:pointer;" onclick="openModal(${i})">
+      <div class="card-meta">${(c.date||'').slice(2,4)}.${(c.date||'').slice(5,7)}.${(c.date||'').slice(8,10)}<span class="tag">${c.tag||'기타'}</span></div>
+      <div>
+        <h3>${c.title}</h3>
+        <p>${c.summary}</p>
+        <div class="src">${c.source||''} 재구성</div>
+      </div>
+    </article>
+  `).join('');
+}
+
+function openModal(i){
+  const c = currentCards[i];
+  document.getElementById('modalMeta').textContent = `${c.date||''} · ${c.tag||''} · ${c.source||''}`;
+  document.getElementById('modalTitle').textContent = c.title;
+  document.getElementById('modalDetail').textContent = c.detail || c.summary;
+  document.getElementById('modalLink').href = c.url || '#';
+  document.getElementById('modalBackdrop').classList.add('open');
+}
+function closeModal(){
+  document.getElementById('modalBackdrop').classList.remove('open');
+}
+
+async function runSearch(){
+  const q = document.getElementById('searchInput').value.trim();
+  const statusEl = document.getElementById('searchStatus');
+  const resultsBox = document.getElementById('resultsBox');
+  const saveRow = document.getElementById('saveRow');
+  if(!q){ statusEl.textContent = '검색어를 입력하세요'; return; }
+
+  statusEl.textContent = '검색 중... (몇 초 걸릴 수 있어요)';
+  resultsBox.innerHTML = '';
+  saveRow.style.display = 'none';
+
+  try{
+    const res = await fetch(`${API_BASE}/search`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ query: q })
+    });
+    const data = await res.json();
+    currentResults = data.items || [];
+    if(currentResults.length === 0){
+      statusEl.textContent = '관련 결과를 찾지 못했습니다. 다른 검색어로 시도해보세요.';
+      return;
+    }
+    statusEl.textContent = `${currentResults.length}건 발견 — 원하는 항목을 선택하세요`;
+    resultsBox.innerHTML = currentResults.map((r,i)=>`
+      <label class="result-item">
+        <input type="checkbox" data-idx="${i}">
+        <div class="result-text">
+          <div class="rt">${r.title}</div>
+          <div class="rs">${r.source||''} · ${r.date||''}</div>
+          <div class="rd">${r.summary||''}</div>
+        </div>
+      </label>
+    `).join('');
+    saveRow.style.display = 'flex';
+  }catch(e){
+    statusEl.textContent = '검색 중 오류가 발생했습니다.';
+  }
+}
+
+async function saveSelected(){
+  const checked = Array.from(document.querySelectorAll('#resultsBox input[type=checkbox]:checked'));
+  if(checked.length === 0){ alert('저장할 항목을 선택하세요.'); return; }
+  const selected = checked.map(cb => currentResults[Number(cb.dataset.idx)]);
+
+  const saveBtn = document.getElementById('saveBtn');
+  saveBtn.disabled = true;
+  saveBtn.textContent = '저장 중...';
+
+  try{
+    const res = await fetch(`${API_BASE}/save`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ selected })
+    });
+    const data = await res.json();
+    document.getElementById('searchStatus').textContent = `${data.saved||0}건 저장 완료`;
+    document.getElementById('resultsBox').innerHTML = '';
+    document.getElementById('saveRow').style.display = 'none';
+    document.getElementById('searchInput').value = '';
+    await loadCards();
+  }catch(e){
+    alert('저장 중 오류가 발생했습니다.');
+  }finally{
+    saveBtn.disabled = false;
+    saveBtn.textContent = '선택한 항목 카드로 저장';
+  }
+}
+
+loadCards();
+</script>
+
+</body>
+</html>
