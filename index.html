@@ -297,97 +297,98 @@ async function generatePDF(){
     const pdf = new jsPDF('p','pt','a4');
     const pageW = pdf.internal.pageSize.getWidth();
     const pageH = pdf.internal.pageSize.getHeight();
-    const margin = 46;
-    const contentW = pageW - margin*2;
-    let y = margin;
 
-    const amber = [176, 108, 32];
-    const ink = [26, 31, 38];
-    const gray = [110, 120, 130];
-    const ruleGray = [206, 199, 176];
-
-    function newPage(){
-      pdf.addPage();
-      y = margin;
-      drawFooter();
-    }
-    function ensureSpace(h){
-      if(y + h > pageH - 50){ newPage(); }
-    }
-    function drawFooter(){
-      const p = pdf.internal.getNumberOfPages();
-      pdf.setFont('helvetica','normal'); pdf.setFontSize(8.5); pdf.setTextColor(...gray);
-      pdf.text(`SMR WATCH · ${p}`, pageW/2, pageH-28, {align:'center'});
-    }
     function fmtDate(d){
       if(!d) return '';
-      const [Y,M,D] = d.split('-');
+      const [Y,M,D] = (d||'').split('-');
       return `${Y}.${M}.${D}`;
     }
 
-    // ===== Masthead =====
-    pdf.setFont('times','bold'); pdf.setFontSize(30); pdf.setTextColor(...ink);
-    pdf.text('SMR WATCH', margin, y+26);
-    pdf.setFont('helvetica','normal'); pdf.setFontSize(9.5); pdf.setTextColor(...gray);
-    const todayStr = new Date().toISOString().slice(0,10).replace(/-/g,'.');
-    pdf.text(`${todayStr} 발행 · 소형모듈원자로 브리핑`, pageW-margin, y+26, {align:'right'});
-    y += 38;
-    pdf.setDrawColor(...ink); pdf.setLineWidth(2);
-    pdf.line(margin, y, pageW-margin, y);
-    y += 3;
-    pdf.setDrawColor(...ink); pdf.setLineWidth(0.6);
-    pdf.line(margin, y, pageW-margin, y);
-    y += 26;
-    drawFooter();
+    // ===== 화면 밖(off-screen)에 인쇄용 레이아웃 구성 =====
+    const rootWidthPx = 780;
+    const printRoot = document.createElement('div');
+    printRoot.style.width = rootWidthPx + 'px';
+    printRoot.style.padding = '44px';
+    printRoot.style.background = '#F6F3E9';
+    printRoot.style.color = '#1A1F26';
+    printRoot.style.fontFamily = "'IBM Plex Sans KR', sans-serif";
+    printRoot.style.position = 'fixed';
+    printRoot.style.left = '-9999px';
+    printRoot.style.top = '0';
 
-    // ===== Articles =====
-    currentCards.forEach((c, idx) => {
-      // measure heights first
-      pdf.setFont('helvetica','bold'); pdf.setFontSize(9);
-      const tagW = pdf.getTextWidth((c.tag||'기타')) + 14;
-
-      pdf.setFont('times','bold'); pdf.setFontSize(16.5);
-      const titleLines = pdf.splitTextToSize(c.title||'', contentW);
-
-      const bodyText = [c.summary, c.detail].filter(Boolean).join(' ');
-      pdf.setFont('helvetica','normal'); pdf.setFontSize(10.5);
-      const bodyLines = pdf.splitTextToSize(bodyText, contentW);
-
-      const blockH = 22 + titleLines.length*20 + bodyLines.length*14 + 26;
-      ensureSpace(blockH);
-
-      // tag chip + date
-      pdf.setFillColor(...amber);
-      pdf.rect(margin, y, tagW, 15, 'F');
-      pdf.setFont('helvetica','bold'); pdf.setFontSize(9); pdf.setTextColor(255,255,255);
-      pdf.text((c.tag||'기타'), margin+7, y+11);
-
-      pdf.setFont('helvetica','normal'); pdf.setFontSize(9.5); pdf.setTextColor(...gray);
-      pdf.text(fmtDate(c.date) + (c.source ? `  ·  ${c.source}` : ''), margin+tagW+10, y+11);
-      y += 24;
-
-      // headline
-      pdf.setFont('times','bold'); pdf.setFontSize(16.5); pdf.setTextColor(...ink);
-      titleLines.forEach(line => { pdf.text(line, margin, y+13); y += 20; });
-      y += 4;
-
-      // body
-      pdf.setFont('helvetica','normal'); pdf.setFontSize(10.5); pdf.setTextColor(50,56,62);
-      bodyLines.forEach(line => { pdf.text(line, margin, y); y += 14; });
-      y += 6;
-
-      // source link
-      if(c.url){
-        pdf.setFont('helvetica','normal'); pdf.setFontSize(9.5); pdf.setTextColor(...amber);
-        pdf.textWithLink('원문 기사 보기 →', margin, y, { url: c.url });
-        y += 14;
-      }
-
-      y += 8;
-      pdf.setDrawColor(...ruleGray); pdf.setLineWidth(0.5);
-      pdf.line(margin, y, pageW-margin, y);
-      y += 22;
+    let html = `
+      <div style="border-bottom:3px solid #1A1F26; padding-bottom:16px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:baseline;">
+        <div style="font-family:'Fraunces',serif; font-weight:600; font-size:32px;">SMR WATCH</div>
+        <div style="font-family:'IBM Plex Mono',monospace; font-size:11px; color:#5C6A76;">${new Date().toISOString().slice(0,10).replace(/-/g,'.')} 발행 · 소형모듈원자로 브리핑</div>
+      </div>
+    `;
+    currentCards.forEach((c, i) => {
+      html += `
+        <div style="padding:22px 0; border-bottom:1px solid #C9C2AC;">
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+            <span style="background:#B06C20; color:#fff; font-family:'IBM Plex Mono',monospace; font-size:10.5px; padding:3px 8px;">${c.tag||'기타'}</span>
+            <span style="font-family:'IBM Plex Mono',monospace; font-size:11px; color:#5C6A76;">${fmtDate(c.date)}${c.source ? ' · ' + c.source : ''}</span>
+          </div>
+          <div style="font-family:'Fraunces',serif; font-weight:600; font-size:19px; line-height:1.35; margin-bottom:8px;">${c.title||''}</div>
+          <div style="font-size:13.5px; line-height:1.7; color:#2E353C; margin-bottom:10px;">${[c.summary, c.detail].filter(Boolean).join(' ')}</div>
+          ${c.url ? `<a class="pdflink" data-idx="${i}" href="${c.url}" style="font-family:'IBM Plex Mono',monospace; font-size:11px; color:#B06C20; text-decoration:none;">원문 기사 보기 →</a>` : ''}
+        </div>
+      `;
     });
+    printRoot.innerHTML = html;
+    document.body.appendChild(printRoot);
+
+    // 링크 요소들의 printRoot 기준 상대 위치를 미리 기록해둠 (캡처 후 좌표 변환에 사용)
+    const linkEls = Array.from(printRoot.querySelectorAll('.pdflink'));
+    const rootRect = printRoot.getBoundingClientRect();
+    const linkPositions = linkEls.map(el => {
+      const r = el.getBoundingClientRect();
+      return {
+        url: el.getAttribute('href'),
+        x: r.left - rootRect.left,
+        y: r.top - rootRect.top,
+        w: r.width,
+        h: r.height,
+      };
+    });
+
+    const canvas = await html2canvas(printRoot, {scale:2, backgroundColor:'#F6F3E9'});
+    document.body.removeChild(printRoot);
+
+    const imgWidth = pageW; // 페이지 폭에 꽉 채움
+    const scalePtPerPx = imgWidth / rootWidthPx; // css px(printRoot 기준) → pt 변환 비율
+    const pageHeightPxOnCanvas = (pageH / scalePtPerPx) * 2; // scale:2 반영한 캔버스 픽셀 기준 한 페이지 높이
+
+    let renderedPx = 0; // 원본 캔버스에서 지금까지 그린 픽셀 위치
+    let pageIndex = 0;
+
+    while (renderedPx < canvas.height) {
+      const sliceHeightPx = Math.min(pageHeightPxOnCanvas, canvas.height - renderedPx);
+
+      const sliceCanvas = document.createElement('canvas');
+      sliceCanvas.width = canvas.width;
+      sliceCanvas.height = sliceHeightPx;
+      const ctx = sliceCanvas.getContext('2d');
+      ctx.drawImage(canvas, 0, renderedPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx);
+
+      const sliceImgHeightPt = sliceHeightPx * (imgWidth / canvas.width);
+
+      if (pageIndex > 0) pdf.addPage();
+      pdf.addImage(sliceCanvas.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, imgWidth, sliceImgHeightPt);
+
+      // 이 페이지 범위 안에 들어가는 링크만 클릭 영역으로 얹기
+      const pageStartPt = (renderedPx / 2) * scalePtPerPx; // canvas px(scale 2) → css px → pt
+      const pageEndPt = pageStartPt + sliceImgHeightPt;
+      linkPositions.forEach(lp => {
+        const yPt = lp.y * scalePtPerPx;
+        if (yPt >= pageStartPt && yPt < pageEndPt) {
+          pdf.link(lp.x * scalePtPerPx, (yPt - pageStartPt), lp.w * scalePtPerPx, lp.h * scalePtPerPx, { url: lp.url });
+        }
+      });
+
+      renderedPx += sliceHeightPx;
+      pageIndex++;
+    }
 
     pdf.save(`SMR-WATCH_${new Date().toISOString().slice(0,10)}.pdf`);
   }catch(e){
